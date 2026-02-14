@@ -1,0 +1,13 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<h3>Manage Collateral</h3>
+<form class="row g-2 mb-3"><div class="col-md-6"><input name="campaign_uuid" value="{{ search_uuid }}" class="form-control" placeholder="Search by Campaign ID"></div><div class="col-auto"><button class="btn btn-outline-primary">Search</button></div></form>
+{% if campaign %}
+<a class="btn btn-success mb-2" href="{% url 'collateral_add' campaign.campaign_uuid %}">Add Collaterals</a>
+<button class="btn btn-secondary mb-2" disabled>Edit Calendar (placeholder)</button>
+<a class="btn btn-outline-secondary mb-2" href="{% url 'campaign_details' campaign.campaign_uuid %}">Back to Home</a>
+<table class="table bg-white"><tr><th>Title</th><th>Type</th><th>Cycle</th><th>Actions</th></tr>
+{% for c in collaterals %}<tr><td>{{ c.content_title }}</td><td>{{ c.get_item_type_display }}</td><td>{{ c.cycle_label }}</td><td><a class="btn btn-sm btn-info" href="{% url 'collateral_preview' c.id %}">Preview</a> <a class="btn btn-sm btn-primary" href="{% url 'collateral_edit' c.id %}">Edit</a> <form method="post" action="{% url 'collateral_delete' c.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-danger">Delete</button></form></td></tr>{% empty %}<tr><td colspan="4">No collaterals yet.</td></tr>{% endfor %}
+</table>
+{% endif %}
+{% endblock %}

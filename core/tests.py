@@ -1,100 +1,170 @@
-from datetime import timedelta
-from io import StringIO
-from django.core.management import call_command
+from django.contrib.auth.models import Group, User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from django.utils import timezone
-from core.db_router import TransactionReportingRouter
-from core.models import ActivityEvent, Campaign, CampaignCycle, Doctor, FieldRepresentative, ShareRecord
-from reporting.models import ActivityEventReport
+from core.models import Campaign, CampaignSystem, Collateral, InClinicConfiguration, SystemType, FieldRepresentative
 
 
-@override_settings(USE_TZ=True)
-class WorkflowTests(TestCase):
+@override_settings(USE_SQLITE="1")
+class PublisherFlowTests(TestCase):
     databases = {"default", "reporting"}
 
     def setUp(self):
-        self.campaign = Campaign.objects.create(
-            name="Cardio CME",
-            brand_name="BrandX",
-            start_date=timezone.now().date() - timedelta(days=30),
-            end_date=timezone.now().date() + timedelta(days=30),
-        )
-        self.cycle = CampaignCycle.objects.create(
-            campaign=self.campaign,
-            cycle_number=1,
-            start_date=timezone.now().date() - timedelta(days=10),
-            end_date=timezone.now().date() + timedelta(days=10),
-            title="Cycle1",
-            message_template="Please review CME",
-            reminder_template="Reminder CME",
-            pdf_url="https://example.com/doc.pdf",
-            video_vimeo_url="https://player.vimeo.com/video/123",
-        )
-        self.rep = FieldRepresentative.objects.create(
-            campaign=self.campaign, name="Rep", email="rep@example.com", whatsapp_number="911111111111"
-        )
+        self.publisher_group = Group.objects.create(name="Publisher")
+        self.publisher = User.objects.create_user(username="publisher", password="pass123")
+        self.publisher.groups.add(self.publisher_group)
+        self.non_publisher = User.objects.create_user(username="other", password="pass123")
 
-    def test_campaign_auto_id(self):
-        self.assertTrue(self.campaign.campaign_id.startswith("CAMP-"))
+    def login_publisher(self):
+        self.client.login(username="publisher", password="pass123")
 
-    def test_share_and_doctor_validation_flow(self):
-        resp = self.client.post(reverse("share_collateral"), {
-            "field_rep_id": self.rep.id,
-            "cycle_id": self.cycle.id,
-            "doctor_whatsapp": "919900000001",
+    def test_role_restricted_dashboard(self):
+        self.client.login(username="other", password="pass123")
+        response = self.client.get(reverse("publisher_dashboard"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_campaign_creation_with_systems_and_csv(self):
+        self.login_publisher()
+        csv_content = (
+            "field-rep-name,email-id,phone-number,brand-supplied-field-rep-id\n"
+            "Rep One,rep1@example.com,999001,B001\n"
+        ).encode()
+        csv_file = SimpleUploadedFile("reps.csv", csv_content, content_type="text/csv")
+
+        response = self.client.post(reverse("campaign_add"), {
+            "company_name": "ABC Pharma",
+            "brand_name": "CardioMax",
+            "doctors_expected": 200,
+            "contact_name": "Jane",
+            "contact_phone": "9999999999",
+            "contact_email": "jane@example.com",
+            "desktop_banner": "https://example.com/d.jpg",
+            "mobile_banner": "https://example.com/m.jpg",
+            "systems": [SystemType.INCLINIC, SystemType.RED_FLAG],
+            "field_rep_csv": csv_file,
         })
-        self.assertEqual(resp.status_code, 200)
-        share = ShareRecord.objects.get()
+        self.assertEqual(response.status_code, 302)
 
-        mismatch = self.client.post(reverse("doctor_verify", args=[share.token]), {"whatsapp_number": "1"})
-        self.assertEqual(mismatch.status_code, 400)
+        campaign = Campaign.objects.get()
+        self.assertIsNotNone(campaign.campaign_uuid)
+        self.assertEqual(campaign.systems.count(), 2)
+        self.assertTrue(campaign.systems.filter(system_type=SystemType.INCLINIC).exists())
+        self.assertEqual(FieldRepresentative.objects.filter(campaign=campaign).count(), 1)
+        self.assertIsNotNone(campaign.recruitment_link)
 
-        verify = self.client.post(reverse("doctor_verify", args=[share.token]), {"whatsapp_number": "919900000001"})
-        self.assertEqual(verify.status_code, 302)
+    def test_invalid_csv_headers(self):
+        self.login_publisher()
+        bad_csv = SimpleUploadedFile("bad.csv", b"x,y,z\n1,2,3\n", content_type="text/csv")
+        self.client.post(reverse("campaign_add"), {
+            "company_name": "ABC Pharma",
+            "brand_name": "CardioMax",
+            "doctors_expected": 200,
+            "contact_name": "Jane",
+            "contact_phone": "9999999999",
+            "contact_email": "jane@example.com",
+            "systems": [SystemType.INCLINIC],
+            "field_rep_csv": bad_csv,
+        })
+        self.assertEqual(FieldRepresentative.objects.count(), 0)
 
-        landing = self.client.get(reverse("doctor_landing", args=[share.token]))
-        self.assertEqual(landing.status_code, 200)
-        share.refresh_from_db()
-        self.assertEqual(share.status, ShareRecord.STATUS_READ)
-
-    def test_button_color_state_logic(self):
-        doctor = Doctor.objects.create(whatsapp_number="919900000002")
-        share = ShareRecord.objects.create(
-            campaign=self.campaign, cycle=self.cycle, field_rep=self.rep, doctor=doctor, whatsapp_message="x"
+    def create_inclinic_campaign(self):
+        campaign = Campaign.objects.create(
+            company_name="ABC Pharma",
+            brand_name="CardioMax",
+            doctors_expected=50,
+            contact_name="Jane",
+            contact_phone="999",
+            contact_email="jane@example.com",
+            created_by=self.publisher,
         )
-        self.assertEqual(share.button_state, "yellow")
-        share.shared_at = timezone.now() - timedelta(days=7)
-        share.save(update_fields=["shared_at"])
-        share.refresh_from_db()
-        self.assertEqual(share.button_state, "purple")
-        share.status = ShareRecord.STATUS_READ
-        share.save(update_fields=["status"])
-        self.assertEqual(share.button_state, "green")
+        CampaignSystem.objects.create(campaign=campaign, system_type=SystemType.INCLINIC)
+        return campaign
 
-    def test_activity_tracking_event_endpoint(self):
-        doctor = Doctor.objects.create(whatsapp_number="919900000003")
-        share = ShareRecord.objects.create(
-            campaign=self.campaign, cycle=self.cycle, field_rep=self.rep, doctor=doctor, whatsapp_message="x"
-        )
-        response = self.client.post(reverse("track_activity", args=[share.id, "video_progress"]), {"value": 85})
+    def test_inclinic_configuration_manual_activation(self):
+        self.login_publisher()
+        campaign = self.create_inclinic_campaign()
+        response = self.client.post(reverse("inclinic_configure", args=[campaign.campaign_uuid]), {
+            "in_charge_name": "Manager",
+            "in_charge_designation": "Lead",
+            "items_per_clinic_per_year": 12,
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "brand_logo": "https://example.com/brand.png",
+            "company_logo": "https://example.com/company.png",
+            "printing_required": "on",
+            "description": "Description",
+            "status": "draft",
+        })
+        self.assertEqual(response.status_code, 302)
+        config = InClinicConfiguration.objects.get()
+        self.assertEqual(config.status, "draft")
+
+        response = self.client.post(reverse("inclinic_configure", args=[campaign.campaign_uuid]), {
+            "in_charge_name": "Manager",
+            "in_charge_designation": "Lead",
+            "items_per_clinic_per_year": 12,
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "brand_logo": "https://example.com/brand.png",
+            "company_logo": "https://example.com/company.png",
+            "description": "Description",
+            "status": "active",
+        })
+        config.refresh_from_db()
+        self.assertEqual(config.status, "active")
+
+    def test_collateral_create_and_preview_order(self):
+        self.login_publisher()
+        campaign = self.create_inclinic_campaign()
+        system = campaign.systems.get(system_type=SystemType.INCLINIC)
+        response = self.client.post(reverse("collateral_add", args=[campaign.campaign_uuid]), {
+            "cycle_label": "C1",
+            "purpose": "doctor_long",
+            "content_title": "Heart Case",
+            "content_id": "CID123",
+            "item_type": "both",
+            "pdf_file": pdf,
+            "vimeo_url": "https://vimeo.com/123456",
+            "banner1": "https://example.com/top.jpg",
+            "banner2": "https://example.com/bottom.jpg",
+            "doctor_attribution": "A. Doctor",
+            "content_description": "Desc",
+            "whatsapp_template": "Hello $collateralLinks",
+            "sort_order": 1,
+        })
+        self.assertEqual(response.status_code, 302)
+        collateral = Collateral.objects.get(campaign_system=system)
+
+        preview = self.client.get(reverse("collateral_preview", args=[collateral.id]))
+        self.assertContains(preview, "Shared by")
+        self.assertContains(preview, "Download PDF")
+
+    def test_vimeo_validation(self):
+        self.login_publisher()
+        campaign = self.create_inclinic_campaign()
+        response = self.client.post(reverse("collateral_add", args=[campaign.campaign_uuid]), {
+            "cycle_label": "C1",
+            "purpose": "doctor_long",
+            "content_title": "Heart Case",
+            "item_type": "video",
+            "vimeo_url": "https://youtube.com/watch?v=x",
+            "doctor_attribution": "A. Doctor",
+            "whatsapp_template": "Hello $collateralLinks",
+            "sort_order": 1,
+        })
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ActivityEvent.objects.count(), 1)
+        self.assertContains(response, "Video source must be Vimeo")
 
-    def test_router_behavior(self):
-        router = TransactionReportingRouter()
-        self.assertEqual(router.db_for_read(ActivityEvent), "default")
-        self.assertEqual(router.db_for_read(ActivityEventReport), "reporting")
-
-    def test_cron_sync_moves_events(self):
-        doctor = Doctor.objects.create(whatsapp_number="919900000004")
-        share = ShareRecord.objects.create(
-            campaign=self.campaign, cycle=self.cycle, field_rep=self.rep, doctor=doctor, whatsapp_message="x"
-        )
-        ActivityEvent.objects.create(share=share, doctor=doctor, event_type="pdf_download")
-
-        out = StringIO()
-        call_command("sync_reporting", stdout=out)
-        self.assertIn("Moved 1 events", out.getvalue())
-        self.assertEqual(ActivityEvent.objects.using("default").count(), 0)
-        self.assertEqual(ActivityEventReport.objects.using("reporting").count(), 1)
+    def test_all_records_on_default_db(self):
+        self.login_publisher()
+        self.client.post(reverse("campaign_add"), {
+            "company_name": "ABC Pharma",
+            "brand_name": "CardioMax",
+            "doctors_expected": 200,
+            "contact_name": "Jane",
+            "contact_phone": "9999999999",
+            "contact_email": "jane@example.com",
+            "systems": [SystemType.INCLINIC],
+        })
+        self.assertEqual(Campaign.objects.using("default").count(), 1)
+        self.assertEqual(Campaign.objects.using("reporting").count(), 0)

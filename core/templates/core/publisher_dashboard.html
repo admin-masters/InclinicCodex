@@ -1,0 +1,20 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<h2>Publisher Dashboard</h2>
+<a class="btn btn-success" href="{% url 'campaign_add' %}">Add Campaign</a>
+<a class="btn btn-outline-secondary" href="{% url 'campaign_list' %}">Edit Campaign</a>
+<hr>
+<table class="table table-bordered bg-white"><thead><tr><th>Campaign ID</th><th>Brand</th><th>Systems</th><th>Actions</th></tr></thead><tbody>
+{% for c in campaigns %}
+<tr>
+  <td>{{ c.campaign_uuid }}</td><td>{{ c.brand_name }}</td>
+  <td>{% for s in c.systems.all %}<span class="badge bg-info text-dark">{{ s.get_system_type_display }}</span> {% endfor %}</td>
+  <td>
+    {% if c.systems.all|length %}
+    <a class="btn btn-sm btn-primary" href="{% url 'campaign_details' c.campaign_uuid %}">Details</a>
+    {% endif %}
+  </td>
+</tr>
+{% empty %}<tr><td colspan="4">No campaigns yet.</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

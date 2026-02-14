@@ -1,0 +1,27 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<h3>Campaign Details</h3>
+<div class="row">
+  <div class="col-md-6">
+    <div class="card"><div class="card-header">Master Fields (Read-only)</div><div class="card-body">
+      <p><strong>Campaign ID:</strong> {{ campaign.campaign_uuid }}</p>
+      <p><strong>Company:</strong> {{ campaign.company_name }}</p>
+      <p><strong>Brand:</strong> {{ campaign.brand_name }}</p>
+      <p><strong>Contact:</strong> {{ campaign.contact_name }} / {{ campaign.contact_email }}</p>
+      <p><strong>Number of Doctors:</strong> {{ campaign.doctors_expected }}</p>
+    </div></div>
+  </div>
+  <div class="col-md-6">
+    <div class="card"><div class="card-header">System Fields (Editable)</div><div class="card-body">
+      {% if config %}
+      <p><strong>In-Charge:</strong> {{ config.in_charge_name }}</p>
+      <p><strong>Status:</strong> {{ config.get_status_display }}</p>
+      {% else %}
+      <p>No In-Clinic config yet.</p>
+      {% endif %}
+      <a class="btn btn-primary" href="{% url 'inclinic_configure' campaign.campaign_uuid %}">Edit In-Clinic fields</a>
+      <a class="btn btn-outline-secondary" href="{% url 'collateral_dashboard' %}?campaign_uuid={{ campaign.campaign_uuid }}">Manage Collaterals</a>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

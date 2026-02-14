@@ -1,117 +1,185 @@
-from datetime import timedelta
-from django.http import HttpResponseBadRequest, JsonResponse
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import LoginView
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils import timezone
-from .forms import CampaignForm, FieldRepForm
-from .models import ActivityEvent, Campaign, CampaignCycle, Doctor, FieldRepresentative, ShareRecord
-from .services import get_active_collaterals, get_current_cycle
+from django.views.decorators.http import require_http_methods
+from .forms import CampaignCreateForm, CollateralForm, InClinicConfigurationForm
+from .models import (
+    Campaign,
+    CampaignSystem,
+    Collateral,
+    FieldRepRecruitmentLink,
+    InClinicConfiguration,
+    SystemType,
+    import_field_reps_from_csv,
+)
 
 
-def dashboard(request):
-    return render(request, "core/dashboard.html", {"campaigns": Campaign.objects.all().order_by("-id")})
+class PublisherLoginView(LoginView):
+    template_name = "core/login.html"
 
 
-def campaign_create(request):
+def publisher_required(view_func):
+    @login_required
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.groups.filter(name="Publisher").exists() and not request.user.is_superuser:
+            raise PermissionDenied("Publisher role required")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+
+@publisher_required
+def publisher_dashboard(request):
+    campaigns = Campaign.objects.filter(created_by=request.user).order_by("-created_at")
+    return render(request, "core/publisher_dashboard.html", {"campaigns": campaigns})
+
+
+@publisher_required
+@require_http_methods(["GET", "POST"])
+def campaign_add(request):
     if request.method == "POST":
-        form = CampaignForm(request.POST)
+        form = CampaignCreateForm(request.POST, request.FILES)
         if form.is_valid():
-            campaign = form.save()
-            return redirect("campaign_edit", campaign_id=campaign.id)
+            campaign = form.save(commit=False)
+            campaign.created_by = request.user
+            campaign.save()
+
+            selected = form.cleaned_data["systems"]
+            for system in selected:
+                CampaignSystem.objects.create(campaign=campaign, system_type=system, is_enabled=True)
+
+            FieldRepRecruitmentLink.objects.get_or_create(campaign=campaign)
+
+            csv_file = request.FILES.get("field_rep_csv")
+            csv_result = None
+            if csv_file:
+                csv_result = import_field_reps_from_csv(campaign, csv_file.read())
+                for err in csv_result.errors:
+                    messages.warning(request, err)
+                if csv_result.created:
+                    messages.success(request, f"Created {csv_result.created} field reps")
+
+            request.session["campaign_create_result_id"] = campaign.id
+            return redirect("campaign_create_result")
     else:
-        form = CampaignForm()
-    return render(request, "core/campaign_form.html", {"form": form})
+        form = CampaignCreateForm()
+
+    return render(request, "core/campaign_add.html", {"form": form})
 
 
-def campaign_edit(request, campaign_id):
-    campaign = get_object_or_404(Campaign, pk=campaign_id)
+@publisher_required
+def campaign_create_result(request):
+    campaign_id = request.session.get("campaign_create_result_id")
+    campaign = get_object_or_404(Campaign, id=campaign_id, created_by=request.user)
+    return render(request, "core/campaign_create_result.html", {"campaign": campaign})
+
+
+@publisher_required
+def campaign_list(request):
+    campaigns = Campaign.objects.filter(created_by=request.user).order_by("-created_at")
+    return render(request, "core/campaign_list.html", {"campaigns": campaigns})
+
+
+@publisher_required
+def inclinic_landing(request, campaign_uuid):
+    campaign = get_object_or_404(Campaign, campaign_uuid=campaign_uuid, created_by=request.user)
+    campaign_system = get_object_or_404(CampaignSystem, campaign=campaign, system_type=SystemType.INCLINIC)
+    return render(request, "core/inclinic_landing.html", {"campaign": campaign, "campaign_system": campaign_system})
+
+
+@publisher_required
+@require_http_methods(["GET", "POST"])
+def inclinic_configure(request, campaign_uuid):
+    campaign = get_object_or_404(Campaign, campaign_uuid=campaign_uuid, created_by=request.user)
+    campaign_system = get_object_or_404(CampaignSystem, campaign=campaign, system_type=SystemType.INCLINIC)
+    config = InClinicConfiguration.objects.filter(campaign_system=campaign_system).first()
+
     if request.method == "POST":
-        if "create_cycle" in request.POST:
-            CampaignCycle.objects.create(
-                campaign=campaign,
-                cycle_number=int(request.POST["cycle_number"]),
-                start_date=request.POST["start_date"],
-                end_date=request.POST["end_date"],
-                title=request.POST["title"],
-                message_template=request.POST["message_template"],
-                reminder_template=request.POST["reminder_template"],
-                pdf_url=request.POST["pdf_url"],
-                video_vimeo_url=request.POST["video_vimeo_url"],
-            )
-        elif "add_rep" in request.POST:
-            FieldRepresentative.objects.create(
-                campaign=campaign,
-                name=request.POST["name"],
-                email=request.POST["email"],
-                whatsapp_number=request.POST["whatsapp_number"],
-                is_active=True,
-            )
-        return redirect("campaign_edit", campaign_id=campaign.id)
-    return render(request, "core/campaign_edit.html", {"campaign": campaign, "reps": campaign.field_reps.all(), "cycles": campaign.cycles.all()})
+        form = InClinicConfigurationForm(request.POST, request.FILES, instance=config)
+        if form.is_valid():
+            saved = form.save(commit=False)
+            saved.campaign_system = campaign_system
+            saved.save()
+            messages.success(request, "In-Clinic configuration saved")
+            return redirect("campaign_details", campaign_uuid=campaign_uuid)
+    else:
+        form = InClinicConfigurationForm(instance=config)
+
+    return render(request, "core/inclinic_configure.html", {"campaign": campaign, "form": form})
 
 
-def field_rep_list(request):
-    reps = FieldRepresentative.objects.order_by("campaign_id", "name")
+@publisher_required
+def campaign_details(request, campaign_uuid):
+    campaign = get_object_or_404(Campaign, campaign_uuid=campaign_uuid, created_by=request.user)
+    campaign_system = CampaignSystem.objects.filter(campaign=campaign, system_type=SystemType.INCLINIC).first()
+    config = InClinicConfiguration.objects.filter(campaign_system=campaign_system).first() if campaign_system else None
+    return render(request, "core/campaign_details.html", {"campaign": campaign, "config": config, "campaign_system": campaign_system})
+
+
+@publisher_required
+def collateral_dashboard(request):
+    search_uuid = request.GET.get("campaign_uuid", "").strip()
+    campaign = None
+    collaterals = Collateral.objects.none()
+    if search_uuid:
+        campaign = Campaign.objects.filter(campaign_uuid=search_uuid, created_by=request.user).first()
+        if campaign:
+            collaterals = Collateral.objects.filter(campaign_system__campaign=campaign, campaign_system__system_type=SystemType.INCLINIC).order_by("sort_order", "-created_at")
+    return render(request, "core/collateral_dashboard.html", {"search_uuid": search_uuid, "campaign": campaign, "collaterals": collaterals})
+
+
+@publisher_required
+@require_http_methods(["GET", "POST"])
+def collateral_add(request, campaign_uuid):
+    campaign = get_object_or_404(Campaign, campaign_uuid=campaign_uuid, created_by=request.user)
+    campaign_system = get_object_or_404(CampaignSystem, campaign=campaign, system_type=SystemType.INCLINIC)
+
     if request.method == "POST":
-        rep = get_object_or_404(FieldRepresentative, pk=request.POST["rep_id"])
-        rep.is_active = request.POST.get("action") == "activate"
-        rep.save(update_fields=["is_active"])
-        return redirect("field_rep_list")
-    return render(request, "core/field_reps.html", {"reps": reps, "form": FieldRepForm()})
+        form = CollateralForm(request.POST, request.FILES)
+        if form.is_valid():
+            collateral = form.save(commit=False)
+            collateral.campaign_system = campaign_system
+            collateral.save()
+            messages.success(request, "Collateral added")
+            return redirect("collateral_dashboard")
+    else:
+        form = CollateralForm()
+    return render(request, "core/collateral_form.html", {"form": form, "campaign": campaign})
 
 
-def share_collateral(request):
-    campaigns = Campaign.objects.all()
+@publisher_required
+@require_http_methods(["GET", "POST"])
+def collateral_edit(request, collateral_id):
+    collateral = get_object_or_404(Collateral, id=collateral_id, campaign_system__campaign__created_by=request.user)
     if request.method == "POST":
-        rep = get_object_or_404(FieldRepresentative, pk=request.POST["field_rep_id"], is_active=True)
-        campaign = rep.campaign
-        cycle = get_object_or_404(CampaignCycle, pk=request.POST["cycle_id"], campaign=campaign)
-        doctor, _ = Doctor.objects.get_or_create(whatsapp_number=request.POST["doctor_whatsapp"])
-        share = ShareRecord.objects.create(
-            campaign=campaign,
-            cycle=cycle,
-            field_rep=rep,
-            doctor=doctor,
-            whatsapp_message=cycle.message_template,
-            is_reminder=request.POST.get("is_reminder") == "1",
-        )
-        url = f"https://wa.me/{doctor.whatsapp_number}?text={share.whatsapp_message} {request.build_absolute_uri(reverse('doctor_verify', args=[share.token]))}"
-        return render(request, "core/share_success.html", {"share": share, "url": url})
-    return render(request, "core/share_form.html", {"campaigns": campaigns})
+        form = CollateralForm(request.POST, request.FILES, instance=collateral)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Collateral updated")
+            return redirect("collateral_dashboard")
+    else:
+        form = CollateralForm(instance=collateral)
+    return render(request, "core/collateral_form.html", {"form": form, "campaign": collateral.campaign_system.campaign, "collateral": collateral})
 
 
-def doctor_status_list(request):
-    rep_id = request.GET.get("rep_id")
-    if not rep_id:
-        return render(request, "core/doctor_status.html", {"shares": []})
-    shares = ShareRecord.objects.filter(field_rep_id=rep_id).order_by("-shared_at")
-    return render(request, "core/doctor_status.html", {"shares": shares})
+@publisher_required
+@require_http_methods(["POST"])
+def collateral_delete(request, collateral_id):
+    collateral = get_object_or_404(Collateral, id=collateral_id, campaign_system__campaign__created_by=request.user)
+    collateral.delete()
+    messages.success(request, "Collateral deleted")
+    return redirect("collateral_dashboard")
 
 
-def doctor_verify(request, token):
-    share = get_object_or_404(ShareRecord, token=token)
-    ActivityEvent.objects.create(share=share, doctor=share.doctor, event_type="whatsapp_click")
-    if request.method == "POST":
-        if request.POST["whatsapp_number"] != share.doctor.whatsapp_number:
-            return HttpResponseBadRequest("Number mismatch")
-        share.doctor.verified_at = timezone.now()
-        share.doctor.save(update_fields=["verified_at"])
-        return redirect("doctor_landing", token=token)
-    return render(request, "core/doctor_verify.html", {"share": share})
+@login_required
+def collateral_preview(request, collateral_id):
+    collateral = get_object_or_404(Collateral, id=collateral_id)
+    return render(request, "core/collateral_preview.html", {"collateral": collateral})
 
 
-def doctor_landing(request, token):
-    share = get_object_or_404(ShareRecord, token=token)
-    ActivityEvent.objects.create(share=share, doctor=share.doctor, event_type="landing_visit")
-    if share.status != ShareRecord.STATUS_READ:
-        share.status = ShareRecord.STATUS_READ
-        share.read_at = timezone.now()
-        share.save(update_fields=["status", "read_at"])
-    return render(request, "core/doctor_landing.html", {"share": share})
-
-
-def track_activity(request, share_id, event_type):
-    share = get_object_or_404(ShareRecord, pk=share_id)
-    value = float(request.POST.get("value", "1"))
-    ActivityEvent.objects.create(share=share, doctor=share.doctor, event_type=event_type, value=value)
-    return JsonResponse({"ok": True})
+def forbidden_view(request, exception=None):
+    return HttpResponseForbidden("Forbidden")
