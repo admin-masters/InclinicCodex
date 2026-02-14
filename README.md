@@ -1,43 +1,23 @@
-# InclinicCodex - Flow 01 Implementation
+# InclinicCodex
 
-This repository now contains an incremental **Flow-01 (Publisher Campaign Creation & In-Clinic Setup)** implementation using Django + MySQL, with multi-database architecture retained.
+Production-ready Django skeleton for in-clinic doctor education distribution with:
 
-## Implemented in this iteration
+- Campaign publisher flows (campaigns, cycles, messages, assets)
+- Brand manager field-rep activation/inactivation
+- Field rep collateral share + reminder state logic
+- Doctor verification + landing page collateral consumption
+- Activity event tracking (clicks, visits, PDF/video/download)
+- Dual database architecture (transaction + reporting)
+- 3-hour sync command (`sync_reporting`) suitable for cron
 
-- Publisher authentication flow (`/login`) and **Publisher role restriction**.
-- Publisher dashboard with Add/Edit campaign entry points.
-- Campaign creation with:
-  - auto-generated UUID (read-only identifier),
-  - multi-system selection (In-Clinic implemented, others placeholders),
-  - master campaign fields,
-  - field-rep CSV upload + validation,
-  - campaign-specific recruitment link generation.
-- Campaign creation result page with selected systems and In-Clinic CTA.
-- In-Clinic landing and campaign-system configuration forms.
-- Campaign details page showing:
-  - read-only master fields,
-  - editable system-specific fields.
-- Collateral management dashboard with campaign search.
-- Add/Edit/Delete collateral support for:
-  - PDF / Video / PDF+Video,
-  - Vimeo URL validation,
-  - optional webinar fields,
-  - WhatsApp template with `$collateralLinks` placeholder storage.
-- Doctor preview simulation page in required display order.
+## Project structure
 
-## Multi DB behavior
+- `inclinic/` - Django project settings and urls
+- `core/` - Main business models/views/tests/management command
+- `reporting/` - Reporting DB model
+- `deployment/` - NGINX, systemd, cron samples
 
-- `default` => transaction database (all writes in this flow).
-- `reporting` => reserved for reporting (future flow).
-- DB router is configured to keep reporting app on reporting DB.
-
-## Deployment artifacts
-
-- `deployment/inclinic.nginx.conf`
-- `deployment/inclinic.service`
-- `deployment/reporting_sync.cron`
-
-## Local setup
+## Quick start
 
 ```bash
 python -m venv .venv
@@ -45,11 +25,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py migrate --database=reporting
-python manage.py test --verbosity=2
+python manage.py runserver
 ```
 
-Use SQLite for local runs/tests:
+For local SQLite testing:
 
 ```bash
 export USE_SQLITE=1
+```
+
+## Cron sync
+
+Run every 3 hours:
+
+```bash
+python manage.py sync_reporting
+```
+
+This moves `ActivityEvent` rows from transaction DB (`default`) to `ActivityEventReport` in reporting DB and deletes moved rows from transaction DB.
+
+## Tests
+
+```bash
+python manage.py test --verbosity=2
 ```

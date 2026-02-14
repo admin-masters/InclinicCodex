@@ -1,8 +1,0 @@
-{% extends 'core/base.html' %}
-{% block content %}
-<h3>In-Clinic System Landing</h3>
-<p><strong>Campaign ID:</strong> {{ campaign.campaign_uuid }}</p>
-<p><strong>Publisher:</strong> {{ request.user.username }}</p>
-<a class="btn btn-primary" href="{% url 'inclinic_configure' campaign.campaign_uuid %}">Add details for this campaign</a>
-<a class="btn btn-outline-secondary" href="{% url 'campaign_list' %}">Edit other campaigns</a>
-{% endblock %}
