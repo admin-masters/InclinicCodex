@@ -1,0 +1,19 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<h3>Campaign Created</h3>
+<p class="alert alert-success">Campaign setup saved successfully.</p>
+<ul>
+  <li><strong>Campaign ID:</strong> {{ campaign.campaign_uuid }}</li>
+  <li><strong>Selected Systems:</strong>
+    {% for s in campaign.systems.all %}{{ s.get_system_type_display }}{% if not forloop.last %}, {% endif %}{% endfor %}
+  </li>
+  <li><strong>Recruitment Link:</strong> {{ request.scheme }}://{{ request.get_host }}{{ campaign.recruitment_link.shareable_path }}</li>
+</ul>
+{% for s in campaign.systems.all %}
+{% if s.system_type == 'inclinic' %}
+<a class="btn btn-primary" href="{% url 'inclinic_landing' campaign.campaign_uuid %}">Proceed to In-Clinic</a>
+{% else %}
+<span class="badge bg-secondary">{{ s.get_system_type_display }} (placeholder)</span>
+{% endif %}
+{% endfor %}
+{% endblock %}

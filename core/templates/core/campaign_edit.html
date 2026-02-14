@@ -1,0 +1,17 @@
+{% extends 'core/base.html' %}{% block content %}
+<h2>Edit {{ campaign.name }}</h2>
+<div class='row'><div class='col-md-6'><h4>Cycles</h4><ul>{% for x in cycles %}<li>#{{ x.cycle_number }} {{ x.title }}</li>{% empty %}<li>None</li>{% endfor %}</ul>
+<form method='post'>{% csrf_token %}<input type='hidden' name='create_cycle' value='1'>
+<input class='form-control mb-2' name='cycle_number' placeholder='Cycle #'>
+<input class='form-control mb-2' name='start_date' placeholder='YYYY-MM-DD'>
+<input class='form-control mb-2' name='end_date' placeholder='YYYY-MM-DD'>
+<input class='form-control mb-2' name='title' placeholder='Title'>
+<textarea class='form-control mb-2' name='message_template' placeholder='Message'></textarea>
+<textarea class='form-control mb-2' name='reminder_template' placeholder='Reminder'></textarea>
+<input class='form-control mb-2' name='pdf_url' placeholder='PDF URL'>
+<input class='form-control mb-2' name='video_vimeo_url' placeholder='Vimeo URL'>
+<button class='btn btn-primary'>Add Cycle</button></form></div>
+<div class='col-md-6'><h4>Field Reps</h4><ul>{% for r in reps %}<li>{{ r.name }} {% if r.is_active %}(Active){% else %}(Inactive){% endif %}</li>{% endfor %}</ul>
+<form method='post'>{% csrf_token %}<input type='hidden' name='add_rep' value='1'>
+<input class='form-control mb-2' name='name' placeholder='Name'><input class='form-control mb-2' name='email' placeholder='Email'><input class='form-control mb-2' name='whatsapp_number' placeholder='WhatsApp'><button class='btn btn-secondary'>Add Rep</button></form>
+</div></div>{% endblock %}

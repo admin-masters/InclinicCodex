@@ -1,0 +1,8 @@
+{% extends 'core/base.html' %}{% block content %}
+<h2>Share Collateral</h2>
+<form method='post'>{% csrf_token %}
+<label>Field Rep ID</label><input class='form-control mb-2' name='field_rep_id'>
+<label>Cycle ID</label><input class='form-control mb-2' name='cycle_id'>
+<label>Doctor WhatsApp</label><input class='form-control mb-2' name='doctor_whatsapp'>
+<button class='btn btn-primary'>Send</button></form>
+{% endblock %}

@@ -1,0 +1,7 @@
+{% extends 'core/base.html' %}{% block content %}
+{% if share.campaign.banner_top_url %}<a href='{{ share.campaign.banner_top_target }}'><img src='{{ share.campaign.banner_top_url }}' class='img-fluid mb-2'></a>{% endif %}
+<h3>{{ share.cycle.title }}</h3>
+<p><a href='{{ share.cycle.pdf_url }}'>View PDF</a> | <a href='{{ share.cycle.pdf_url }}' download>Download PDF</a></p>
+<div class='ratio ratio-16x9'><iframe src='{{ share.cycle.video_vimeo_url }}' allowfullscreen></iframe></div>
+{% if share.campaign.banner_bottom_url %}<a href='{{ share.campaign.banner_bottom_target }}'><img src='{{ share.campaign.banner_bottom_url }}' class='img-fluid mt-2'></a>{% endif %}
+{% endblock %}

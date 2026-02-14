@@ -1,0 +1,10 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<h3>Configure In-Clinic Campaign</h3>
+<p><strong>Campaign ID:</strong> {{ campaign.campaign_uuid }}</p>
+<form method="post" enctype="multipart/form-data" class="card card-body bg-white">{% csrf_token %}
+{{ form.as_p }}
+<button class="btn btn-success">Save</button>
+<a class="btn btn-link" href="{% url 'inclinic_landing' campaign.campaign_uuid %}">Back</a>
+</form>
+{% endblock %}
