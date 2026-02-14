@@ -1,0 +1,6 @@
+{% extends 'core/base.html' %}{% block content %}
+<h1>Campaigns</h1>
+<table class='table table-bordered'><tr><th>ID</th><th>Name</th><th>Brand</th><th></th></tr>
+{% for c in campaigns %}<tr><td>{{ c.campaign_id }}</td><td>{{ c.name }}</td><td>{{ c.brand_name }}</td><td><a class='btn btn-sm btn-primary' href='/publisher/campaign/{{ c.id }}/edit/'>Edit</a></td></tr>{% empty %}<tr><td colspan='4'>No campaigns</td></tr>{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,1 @@
+{% extends 'core/base.html' %}{% block content %}<h2>Verify WhatsApp</h2><form method='post'>{% csrf_token %}<input name='whatsapp_number' class='form-control mb-2'><button class='btn btn-primary'>Verify</button></form>{% endblock %}

@@ -1,0 +1,1 @@
+0 */3 * * * cd /var/www/InclinicCodex && /var/www/venv/bin/python manage.py sync_reporting >> /var/log/inclinic_sync.log 2>&1

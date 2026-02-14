@@ -1,0 +1,21 @@
+[Unit]
+Description=InClinic Django Gunicorn Service
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/InclinicCodex
+Environment="DJANGO_SETTINGS_MODULE=inclinic.settings"
+Environment="DB_ENGINE=django.db.backends.mysql"
+Environment="DB_HOST=127.0.0.1"
+Environment="DB_PORT=3306"
+Environment="DB_NAME=testing_db"
+Environment="DB_USER=testing_root"
+Environment="DB_PASSWORD=testing_password"
+Environment="REPORTING_DB_NAME=testing_db_reporting"
+ExecStart=/var/www/venv/bin/gunicorn --workers 3 --bind unix:/run/inclinic.sock inclinic.wsgi:application
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
